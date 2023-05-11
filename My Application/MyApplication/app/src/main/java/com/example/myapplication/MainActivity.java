@@ -19,14 +19,24 @@ import androidx.appcompat.app.AppCompatActivity;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.ObjectOutputStream;
+import java.io.OutputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
 import java.net.InetSocketAddress;
+import java.security.KeyFactory;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
 import java.security.Signature;
-
+import java.security.spec.X509EncodedKeySpec;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.ResultSet;
+import java.sql.Statement;
+import java.sql.Connection;
 import javax.net.ssl.SSLSocket;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.SSLContext;
@@ -35,7 +45,7 @@ import javax.net.ssl.SSLContext;
 public class MainActivity extends AppCompatActivity {
 
     // Setup Server information
-    protected static String server = "192.168.1.133";
+    protected static String server = "localhost";
     protected static int port = 7070;
 
 
@@ -194,18 +204,31 @@ public class MainActivity extends AppCompatActivity {
 
                                     // 2. Firmar los datos
                                     // TODO: Hacer que haya tantos pares de clave como clientes seleccionables
-                                    KeyPairGenerator keygen = null;
+                                    Connection connection = null;
                                     try {
-                                        keygen = KeyPairGenerator.getInstance("RSA");
-                                        keygen.initialize(2048);
-                                        KeyPair keys = keygen.generateKeyPair();
+                                        connection = DriverManager.getConnection("jdbc:sqlite:base.db");
+                                        Statement statement = connection.createStatement();
+                                        statement.setQueryTimeout(30); // Wait only 30 seconds to connect
 
-                                        Signature sg = Signature.getInstance("SHA256withRSA");
-                                        sg.initSign(keys.getPrivate());
-                                        sg.update(message.getBytes());
+                                        String query = "SELECT * FROM certs WHERE name = ?";
+                                        PreparedStatement p = connection.prepareStatement(query);
+                                        p.setString(1,spinner.getSelectedItem().toString());
+                                        ResultSet queryset = p.executeQuery();
+                                        byte[] firma = null;
+                                        if(queryset.next()){
+                                            byte[] pubKeyBytes = queryset.getBytes("pubkey");
+                                            PublicKey pubKey = KeyFactory.getInstance("RSA").generatePublic(new X509EncodedKeySpec(pubKeyBytes));
+                                            byte[] privKeyBytes = queryset.getBytes("privkey");
+                                            PrivateKey privKey = KeyFactory.getInstance("RSA").generatePrivate(new X509EncodedKeySpec(privKeyBytes));
+                                            Signature sg = Signature.getInstance("SHA256withRSA");
+                                            sg.initSign(privKey);
+                                            sg.update(message.getBytes());
+                                            firma = sg.sign();
+                                        }
 
-                                        byte[] firma = sg.sign();
-                                        System.out.println(firma.toString());
+
+
+
 
                                         // 3. Enviar los datos
                                         SSLSocketFactory factory = (SSLSocketFactory) SSLSocketFactory.getDefault();
@@ -214,14 +237,13 @@ public class MainActivity extends AppCompatActivity {
                                         socket.setEnabledProtocols(protocols);
 
 
-                                        // Create BufferedReader for reading server response
-                                        BufferedReader input = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-
-                                        // Create PrintWriter for sending login to server
-                                        PrintWriter output = new PrintWriter(new OutputStreamWriter(socket.getOutputStream()));
-                                        output.println(message);
-                                        output.println(keys.getPublic());
-                                        output.println(firma);
+                                        OutputStream output = socket.getOutputStream();
+                                        //Envio de cliente
+                                        output.write(spinner.getSelectedItem().toString().getBytes());
+                                        //Envio de mensaje
+                                        output.write(message.getBytes());
+                                        //Envio de la firma
+                                        output.write(firma);
                                         Toast.makeText(MainActivity.this, "Petición enviada correctamente", Toast.LENGTH_SHORT).show();
 
                                     } catch (Exception e) {

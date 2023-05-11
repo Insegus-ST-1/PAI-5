@@ -2,9 +2,17 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.InputStreamReader;
+import java.io.ObjectInputStream;
 import java.io.OutputStreamWriter;
 import java.io.PrintWriter;
+import java.security.KeyPairGenerator;
+import java.security.PublicKey;
+import java.security.Signature;
+import java.security.KeyFactory;
+import java.security.spec.X509EncodedKeySpec;
+import java.sql.Connection;
 import java.time.LocalDateTime;
 import java.util.Arrays;
 import java.util.HashSet;
@@ -27,15 +35,31 @@ public class server{
             // Accept connection
             SSLSocket clientSocket = (SSLSocket) serverSocket.accept();
 
-            // Open BufferedReader for reading data from client
-            BufferedReader input = new BufferedReader(new InputStreamReader(clientSocket.getInputStream()));
 
-            // Open PrintWriter for writing data to client
-		    PrintWriter output = new PrintWriter(new OutputStreamWriter(clientSocket.getOutputStream()));
+            InputStream input = clientSocket.getInputStream();
 
-            String hello = input.readLine();
-            System.out.print(hello);
-            output.print(" hello client");
+            byte[] customerBytes = input.read();
+            String customer = customerBytes.toString();
+            byte[] messageBytes = input.read();
+            byte[] firma = input.read();
+
+            Connection connection = DriverManager.getConnection("jdbc:sqlite:base.db");
+            Statement statement = connection.createStatement();
+            statement.setQueryTimeout(30); // Wait only 30 seconds to connect
+
+            String query = "SELECT * FROM certs WHERE name = ?";
+            PreparedStatement p = connection.prepareStatement(query);
+            p.setString(1,customer);
+            ResultSet queryset = p.executeQuery();
+            Signature sg = Signature.getInstance("SHA256withRSA");
+            sg.initVerify(null);
+            sg.update(messageBytes);
+            sg.verify(firma);
+
+
+            
+
+            
         }
 
         
